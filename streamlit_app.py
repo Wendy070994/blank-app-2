@@ -1,6 +1,5 @@
 # ─── Emoji-safe helpers ─────────────────────────────────────────────
 import re
-import emoji
 
 def _remove_emoji(text: str) -> str:
     """
