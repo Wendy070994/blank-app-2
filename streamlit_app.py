@@ -11,7 +11,6 @@ import io
 from pathlib import Path
 from typing import List
 
-import nltk
 import pandas as pd
 import streamlit as st
 
