@@ -11,10 +11,15 @@ import logging
 import re
 from typing import List
 
+import emoji
+import nltk
 import pandas as pd
 import streamlit as st
+from nltk.tokenize import sent_tokenize
+from unidecode import unidecode
 
 # One-time NLTK download (safe to re-run)
+nltk.download("punkt", quiet=True)
 
 # ---------------------------------------------------------------------
 # Configuration
@@ -152,4 +157,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
