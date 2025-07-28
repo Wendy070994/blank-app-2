@@ -24,7 +24,7 @@ import io
 import re
 from typing import List
 
-import nltk
+
 import pandas as pd
 import streamlit as st
 from nltk.tokenize import sent_tokenize
