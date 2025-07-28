@@ -15,11 +15,6 @@ import pandas as pd
 import streamlit as st
 
 ###############################################################################
-# One-time NLTK setup                                                          #
-###############################################################################
-from nltk.tokenize import sent_tokenize
-
-###############################################################################
 # Transformation helpers (adapted unchanged from instagram_sentence_transformer) #
 ###############################################################################
 def _normalize(text: str) -> str:
