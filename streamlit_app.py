@@ -110,7 +110,7 @@ if st.sidebar.button("Process"):
             rows.append(
                 {
                     "ID": row[id_col],
-                    "Sentence ID": sid,
+            
                     "Context": row[ctx_col],
                     "Statement": sent,
                 }
