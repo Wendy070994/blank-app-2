@@ -24,10 +24,10 @@ import io
 import re
 from typing import List
 
-import nltk
+
 import pandas as pd
 import streamlit as st
-from nltk.tokenize import sent_tokenize
+
 
 # one-time download for sentence splitter
 nltk.download("punkt", quiet=True)
