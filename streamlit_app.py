@@ -52,7 +52,6 @@ def split_into_sentences(
     if isolate_hashtags:
         text = HASHTAG_RE.sub(r". \1 .", text)
 
-    raw_sents = (s.strip() for s in sent_tokenize(text.replace("\n", " ")))
 
     return [s for s in raw_sents if s and not PUNCT_ONLY_RE.fullmatch(s)]
 
@@ -106,7 +105,7 @@ if st.sidebar.button("Process"):
 
     rows = []
     for _, row in df_raw.iterrows():
-        sentences = split_into_sentences(row[ctx_col], isolate_hash)
+      
         for sid, sent in enumerate(sentences, 1):
             rows.append(
                 {
