@@ -106,7 +106,7 @@ if st.sidebar.button("Process"):
     rows = []
     for _, row in df_raw.iterrows():
       
-        for sid, sent in enumerate(sentences, 1):
+
             rows.append(
                 {
                     "ID": row[id_col],
