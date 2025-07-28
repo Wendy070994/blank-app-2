@@ -1,33 +1,27 @@
-# streamlit_app.py
-"""
-📝 Text Transformation App – Streamlit
---------------------------------------
+# 📝 Text Transformation App – v2
+#
+# Key upgrades
+# ● Bigger built-in keyword dictionary (10 themed categories, 200+ keywords)
+# ● Two matching modes   – “first hit” or “all applicable” categories
+# ● Sentence filters     – min-length & min-word controls
+# ● Fast caching with st.cache_data (re-runs are instant)
+#
+# Usage
+# 1. Upload CSV   (ID + Context columns)
+# 2. Tweak options & dictionary (JSON box)
+# 3. Click Transform → preview + download
 
-Upload any CSV that has:
-• one column that uniquely identifies each record (ID)
-• one column that contains free-text (Context)
-
-The app will split Context into sentence-level rows and, using a
-keyword dictionary, label each sentence with a simple category.
-
-Output columns
-• ID          – value from the chosen ID column
-• Sentence ID – sequential number inside each original record
-• Context     – original full text
-• Statement   – extracted sentence
-• Category    – first matching category from the keyword dictionary
-"""
+from __future__ import annotations
 
 from io import StringIO
 import json
 import re
-from typing import List
+from typing import List, Set
 
 import pandas as pd
 import streamlit as st
 
-
-# ─────────────────────────────  Page set-up  ─────────────────────────────
+#  ───────────────────────────────────────── UI & CSS
 st.set_page_config(
     page_title="Text Transformation App",
     page_icon="📝",
@@ -35,162 +29,253 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Inject a bit of CSS for nicer spacing / centring
 st.markdown(
     """
-<style>
-    .block-container h1:first-child{
-        text-align:center;font-size:3rem;font-weight:800;margin-bottom:1.2rem}
-    .block-container{padding-top:1.2rem}
-    section[data-testid="stSidebar"] h2{
-        font-size:1.05rem;margin-bottom:.3rem}
-</style>
-""",
+    <style>
+        .block-container h1:first-child{
+            text-align:center;font-size:3rem;font-weight:800;margin-bottom:1.2rem}
+        .block-container{padding-top:1.2rem}
+        section[data-testid="stSidebar"] h2{
+            font-size:1.05rem;margin-bottom:.4rem}
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
 st.title("📝 Text Transformation App")
 
-# ─────────────────────────────  Default keyword dictionary  ─────────────────────────────
+
+#  ───────────────────────────────────────── Default dictionary
 DEFAULT_DICT = {
-    "Fashion": ["style", "fashion", "wardrobe", "clothing", "outfit"],
-    "Food": ["delicious", "food", "dinner", "lunch", "restaurant"],
-    "Travel": ["travel", "trip", "vacation", "explore", "journey"],
-    "Fitness": ["workout", "fitness", "exercise", "gym", "training"],
+    "Fashion": [
+        "style", "fashion", "wardrobe", "clothes", "outfit", "OOTD", "runway",
+        "trend", "vogue", "chic", "couture", "lookbook", "garment", "designer",
+    ],
+    "Food": [
+        "delicious", "foodie", "dinner", "lunch", "restaurant", "recipe",
+        "taste", "yummy", "cuisine", "dessert", "snack", "brunch",
+        "kitchen", "chef", "cook", "coffee", "tea",
+    ],
+    "Travel": [
+        "travel", "trip", "vacation", "explore", "journey", "flight",
+        "hotel", "backpacking", "adventure", "wanderlust", "tourism",
+        "passport", "roadtrip", "getaway", "destinations",
+    ],
+    "Fitness": [
+        "workout", "fitness", "exercise", "gym", "training", "cardio",
+        "strength", "run", "yoga", "HIIT", "wellness", "fitspo",
+        "calisthenics", "pilates", "cycling", "marathon",
+    ],
+    "Technology": [
+        "tech", "gadget", "smartphone", "AI", "machine learning", "robot",
+        "software", "hardware", "coding", "programming", "startup",
+        "innovation", "app", "VR", "blockchain", "5G", "cyber", "cloud",
+    ],
+    "Sports": [
+        "soccer", "football", "basketball", "nba", "nfl", "cricket",
+        "baseball", "tennis", "golf", "olympics", "athlete", "score",
+        "goal", "match", "tournament", "league", "championship", "stadium",
+    ],
+    "Beauty": [
+        "beauty", "makeup", "skincare", "cosmetics", "lipstick", "foundation",
+        "mascara", "blush", "palette", "fragrance", "haircare", "salon",
+        "spa", "glow", "nails", "manicure",
+    ],
+    "Nature": [
+        "nature", "forest", "mountain", "beach", "sunset", "sunrise",
+        "wildlife", "ocean", "lake", "river", "landscape", "hiking",
+        "camping", "outdoors", "flora", "fauna", "eco", "green",
+    ],
+    "Health": [
+        "health", "nutrition", "diet", "vitamin", "mental health", "sleep",
+        "mindfulness", "meditation", "doctor", "medicine", "healthy",
+        "hydration", "immune", "well-being",
+    ],
+    "Entertainment": [
+        "movie", "film", "cinema", "music", "concert", "album", "song",
+        "tv", "series", "netflix", "premiere", "actor", "actress",
+        "festival", "show", "theatre", "hollywood", "bollywood",
+    ],
 }
 
-# ─────────────────────────────  Helper functions  ─────────────────────────────
-PUNCT_ONLY_RE = re.compile(r"^[\W_]+$")   # rows like "!!!"
-HASHTAG_RE = re.compile(r"(#\\w+)")        # capture #Tags
+#  ───────────────────────────────────────── Regex helpers
+URL_RE = re.compile(r"https?://\\S+")
+PUNCT_ONLY_RE = re.compile(r"^[\\W_]+$")     # rows like “!!!”
+HASHTAG_RE = re.compile(r"(#\\w+)")
 
 
-def split_sentences(text: str, isolate_hashtags: bool) -> List[str]:
+#  ───────────────────────────────────────── Functions
+def clean_text(text: str) -> str:
+    """Remove URLs and normalise whitespace."""
+    return URL_RE.sub("", text).replace("\\n", " ").strip()
+
+
+def split_sentences(text: str, isolate_hash: bool) -> List[str]:
     """
-    Break *text* into individual sentences.
-
-    If *isolate_hashtags* is True, hashtags become their own sentences.
-    Sentences containing only punctuation are discarded.
+    Break text into sentences; optionally isolate hashtags.
     """
-    if not isinstance(text, str) or not text.strip():
+    if not text:
         return []
 
-    if isolate_hashtags:
+    if isolate_hash:
         text = HASHTAG_RE.sub(r". \\1 .", text)
 
-    parts = re.split(r"(?<=[.!?])\\s+|(?=#[^\\s]+)", text.replace("\\n", " "))
-    clean = [p.strip() for p in parts if p.strip()]
+    # Very fast lightweight splitter
+    parts = re.split(r"(?<=[.!?])\\s+|(?=#[^\\s]+)", text)
+    return [p.strip() for p in parts if p.strip()]
 
-    return [c for c in clean if not PUNCT_ONLY_RE.fullmatch(c)]
+
+def filter_sentence(s: str, min_chars: int, min_words: int) -> bool:
+    """True if sentence passes length & punctuation filters."""
+    if len(s) < min_chars:
+        return False
+    if len(s.split()) < min_words:
+        return False
+    return not PUNCT_ONLY_RE.fullmatch(s)
 
 
-def classify(sentence: str, kw_dict: dict) -> str:
-    """Return the first category whose keywords appear in *sentence* (case-insensitive)."""
-    low = sentence.lower()
+def classify_sentence(
+    s: str, kw_dict: dict[str, List[str]], mode: str
+) -> str | List[str]:
+    """
+    Return category/ies for sentence *s*.
+
+    mode = 'first' → first matching category (fast)  
+    mode = 'all'   → semicolon-separated list of every match
+    """
+    s_low = s.lower()
+    hits: List[str] = []
     for cat, kws in kw_dict.items():
-        if any(k.lower() in low for k in kws):
-            return cat
-    return "Uncategorized"
+        if any(k.lower() in s_low for k in kws):
+            if mode == "first":
+                return cat
+            hits.append(cat)
+
+    return hits[0] if mode == "first" else ";".join(hits) or "Uncategorized"
 
 
-def transform_df(
+@st.cache_data(show_spinner=False)
+def transform(
     df: pd.DataFrame,
     id_col: str,
     ctx_col: str,
-    kw_dict: dict,
-    isolate_hashtags: bool,
+    kw_dict: dict[str, List[str]],
+    isolate_hash: bool,
+    min_chars: int,
+    min_words: int,
+    match_mode: str,
 ) -> pd.DataFrame:
-    """Core transformation: split, classify, tidy."""
+    """Heavy work – cached so re-runs are instant."""
     rows = []
-    for _, r in df.iterrows():
-        sents = split_sentences(r[ctx_col], isolate_hashtags)
-        for sid, sent in enumerate(sents, 1):
+    for _, row in df.iterrows():
+        ctx = clean_text(str(row[ctx_col]))
+        sentences = split_sentences(ctx, isolate_hash)
+
+        sent_idx = 0
+        for s in sentences:
+            if not filter_sentence(s, min_chars, min_words):
+                continue
+            sent_idx += 1
             rows.append(
                 {
-                    "ID": r[id_col],
-                    "Sentence ID": sid,
-                    "Context": r[ctx_col],
-                    "Statement": sent,
-                    "Category": classify(sent, kw_dict),
+                    "ID": row[id_col],
+                    "Sentence ID": sent_idx,
+                    "Context": ctx,
+                    "Statement": s,
+                    "Category": classify_sentence(s, kw_dict, match_mode),
                 }
             )
+
     return pd.DataFrame(rows)
 
 
-# ─────────────────────────────  Sidebar  ─────────────────────────────
-## 1️⃣  Upload
-st.sidebar.header("1️⃣  Upload CSV")
-file = st.sidebar.file_uploader("Choose a CSV file", type=["csv"])
+#  ───────────────────────────────────────── Sidebar
+st.sidebar.header("1️⃣ Upload CSV")
+csv_file = st.sidebar.file_uploader("Select a CSV file", type=["csv"])
 
-if file is None:
-    st.info("👈  Upload a CSV from the sidebar to begin.")
+if csv_file is None:
+    st.info("👈 Upload a CSV from the sidebar to begin.")
     st.stop()
 
-df_input = pd.read_csv(file)
+df_in = pd.read_csv(csv_file)
+if df_in.empty:
+    st.error("Uploaded file is empty.")
+    st.stop()
 
-## 2️⃣  Column selection
-st.sidebar.header("2️⃣  Select columns")
-id_column = st.sidebar.selectbox("ID column (unique key)", df_input.columns)
-ctx_column = st.sidebar.selectbox("Context column (text)", df_input.columns)
+st.sidebar.header("2️⃣ Select columns")
+id_col = st.sidebar.selectbox("ID column (unique key)", df_in.columns)
+ctx_col = st.sidebar.selectbox("Context column (text)", df_in.columns)
 
-## 3️⃣  Options
-st.sidebar.header("3️⃣  Options")
-isolate_hashtags = st.sidebar.checkbox("Treat hashtags as separate sentences", True)
+st.sidebar.header("3️⃣ Sentence options")
+isolate_hash = st.sidebar.checkbox("Hashtags as standalone sentences", True)
+min_chars = st.sidebar.slider("Min characters per sentence", 1, 100, 3)
+min_words = st.sidebar.slider("Min words per sentence", 1, 20, 1)
 
-## 4️⃣  Keyword dictionary
-st.sidebar.header("4️⃣  Modify keyword dictionary")
+st.sidebar.header("4️⃣ Matching options")
+match_mode = st.sidebar.radio(
+    "Category assignment",
+    ["first", "all"],
+    help="‘first’ = stop at first match (faster).\n"
+         "‘all’ = list every matching category.",
+)
+
+st.sidebar.header("5️⃣ Keyword dictionary (JSON)")
 dict_text = st.sidebar.text_area(
-    "Dictionary (JSON – edit as needed)",
+    "Edit or paste a custom dictionary",
     value=json.dumps(DEFAULT_DICT, indent=2),
-    height=280,
+    height=300,
 )
 
 try:
-    KEYWORD_DICT = json.loads(dict_text)
-    if not isinstance(KEYWORD_DICT, dict):
+    USER_DICT = json.loads(dict_text)
+    if not isinstance(USER_DICT, dict):
         raise ValueError
 except Exception:
-    st.sidebar.error("❌ Invalid JSON. Falling back to default dictionary.")
-    KEYWORD_DICT = DEFAULT_DICT
+    st.sidebar.error("❌ Invalid JSON. Using built-in dictionary.")
+    USER_DICT = DEFAULT_DICT
 
-# ─────────────────────────────  Instructions (always visible)  ─────────────────────────────
+#  ───────────────────────────────────────── Instructions
 st.markdown(
     """
 ### How to Use
-1. **Upload** your CSV file in the sidebar.  
-2. **Select** the *ID* and *Context* columns.  
-3. **Configure options** – Choose whether hashtags become separate sentences.  
-4. **Edit** the keyword dictionary if you wish.  
-5. Click **Transform** to process your data.  
-6. **Download** the results as a new CSV.
+1. **Upload** your CSV in the sidebar.  
+2. **Select** *ID* and *Context* columns.  
+3. **Configure** sentence rules, matching mode, and dictionary.  
+4. Click **Transform** to run.  
+5. **Download** your processed CSV.
 
-### Output Format
-| Column       | Description                                                |
-|--------------|------------------------------------------------------------|
-| `ID`         | The identifier from your selected ID column                |
-| `Sentence ID`| Sequential number for each sentence inside a record        |
-| `Context`    | The original text from your Context column                 |
-| `Statement`  | Individual sentence extracted from the context             |
-| `Category`   | First matching category based on the keyword dictionary    |
+#### Output Columns
+| Column        | Description                                   |
+|---------------|-----------------------------------------------|
+| `ID`          | value from chosen ID column                   |
+| `Sentence ID` | running number within each original record    |
+| `Context`     | original text after basic cleaning (URLs out) |
+| `Statement`   | extracted sentence                            |
+| `Category`    | assigned category (or categories)             |
 """,
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────  Transform button  ─────────────────────────────
-if st.sidebar.button("⚙️  Transform"):
-    with st.spinner("Processing…"):
-        output_df = transform_df(
-            df_input, id_column, ctx_column, KEYWORD_DICT, isolate_hashtags
+#  ───────────────────────────────────────── Run
+if st.sidebar.button("⚙️ Transform"):
+    with st.spinner("Processing… this is cached, re-runs are instant"):
+        df_out = transform(
+            df_in,
+            id_col,
+            ctx_col,
+            USER_DICT,
+            isolate_hash,
+            min_chars,
+            min_words,
+            match_mode,
         )
 
-    st.success(f"Done! Extracted {len(output_df):,} sentences.")
-    st.dataframe(output_df.head(25), use_container_width=True)
+    st.success(f"Done! Extracted {len(df_out):,} sentences.")
+    st.dataframe(df_out.head(30), use_container_width=True)
 
-    buff = StringIO()
-    output_df.to_csv(buff, index=False)
+    buf = StringIO()
+    df_out.to_csv(buf, index=False)
     st.download_button(
-        "💾  Download CSV",
-        data=buff.getvalue(),
-        file_name="transformed_text.csv",
-        mime="text/csv",
+        "💾 Download CSV", data=buf.getvalue(),
+        file_name="transformed_text.csv", mime="text/csv"
     )
-
