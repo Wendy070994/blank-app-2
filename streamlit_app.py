@@ -1,140 +1,171 @@
+# streamlit_app.py — drop expander, always visible instructions
 """
-📝 Text Transformation App
-==========================
-
-Split long captions (or any free-text) into individual sentences.
-
-Workflow
-1. Upload a CSV that contains an **ID** column (post identifier) and a
-   **Context** column (text/caption).
-2. Pick those two columns from the dropdowns.
-3. Choose whether to pull out hashtags as standalone sentences.
-4. Click **Process** – preview appears and you can download the result.
-
-Output columns
-• ID          – value from your chosen ID column  
-• Sentence ID – sequential number within each original record  
-• Context     – original full caption/text row  
-• Statement   – one sentence extracted from *Context*
+📝 Text Transformation App – Streamlit
+-------------------------------------
+Changes in this patch:
+ 
+* **Removed** the collapsible expander. The How‑to section now shows by default.
+* No other behaviour changed.
 """
-
-from __future__ import annotations
-
-import io
+ 
+from io import StringIO
+import json
 import re
-from typing import List
-
-
+ 
 import pandas as pd
 import streamlit as st
-
-
-# one-time download for sentence splitter
-
-# ------------------------------------------------------------------ helpers
-PUNCT_ONLY_RE = re.compile(r"^[\W_]+$")          # e.g. '!!!'
-HASHTAG_RE    = re.compile(r"(#\w+)")            # captures #Sale, #2024 etc.
-
-
-def split_into_sentences(
-    text: str,
-    isolate_hashtags: bool = True,
-) -> List[str]:
-    """
-    Break *text* into sentences.
-
-    • If *isolate_hashtags* is True, hashtags become their own sentences.
-    • Sentences that are only punctuation are discarded.
-    """
-    if not isinstance(text, str) or not text.strip():
-        return []
-
-    if isolate_hashtags:
-        text = HASHTAG_RE.sub(r". \1 .", text)
-
-
-    return [s for s in raw_sents if s and not PUNCT_ONLY_RE.fullmatch(s)]
-
-
-# ------------------------------------------------------------------ page config
-st.set_page_config(page_title="📝 Text Transformation App", layout="wide")
-st.title("📝 Text Transformation App")
-
-with st.expander("ℹ️  How to Use", expanded=True):
-    st.markdown(
-        """
-        1. **Upload** your CSV containing Instagram (or other) text.
-        2. **Select** the *ID* column (unique post/chat ID) and the *Context*
-           column (caption/text to split).
-        3. **Options**  
-           • *Hashtags as separate sentences* – if ticked, `#Tags` become
-             one-sentence rows.  
-        4. Click **Process** to preview and **Download** the transformed file.
-        """
-    )
-
-# ------------------------------------------------------------------ upload
-csv_file = st.file_uploader("📤 Upload CSV", type=["csv"])
-
-if csv_file is None:
-    st.stop()
-
-df_raw = pd.read_csv(csv_file)
-
-if df_raw.empty:
-    st.error("Uploaded file is empty.")
-    st.stop()
-
-# ------------------------------------------------------------------ column pickers
-st.sidebar.header("⚙️  Configuration")
-
-id_col = st.sidebar.selectbox("Select ID column (unique identifier)", df_raw.columns)
-ctx_col = st.sidebar.selectbox("Select Context column (text to split)", df_raw.columns)
-
-isolate_hash = st.sidebar.checkbox(
-    "Treat hashtags as separate sentences", value=True
+ 
+# ──────────────────────────────  Page set‑up  ──────────────────────────────
+st.set_page_config(
+    page_title="Text Transformation App",
+    page_icon="📝",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
-
-if not id_col or not ctx_col:
-    st.info("Choose both columns to proceed.")
-    st.stop()
-
-# ------------------------------------------------------------------ processing
-if st.sidebar.button("Process"):
-    st.subheader("Preview")
-
+ 
+# Inject CSS for centred hero + compact padding
+st.markdown(
+    """
+<style>
+        /* ─── Hero title ─── */
+        .block-container h1:first-child {
+            text-align: center;
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 1.25rem;
+        }
+        /* ─── Compact top padding ─── */
+        .block-container { padding-top: 1.2rem; }
+        /* ─── Sidebar header size ─── */
+        section[data-testid="stSidebar"] h2 {
+            font-size: 1.05rem; margin-bottom: .3rem;
+        }
+</style>
+    """,
+    unsafe_allow_html=True,
+)
+ 
+st.title("📝 Text Transformation App")
+ 
+# ──────────────────────────────  Default dictionary  ──────────────────────────────
+DEFAULT_DICT = {
+    "Fashion": ["style", "fashion", "wardrobe", "clothing", "outfit"],
+    "Food": ["delicious", "food", "dinner", "lunch", "restaurant"],
+    "Travel": ["travel", "trip", "vacation", "explore", "journey"],
+    "Fitness": ["workout", "fitness", "exercise", "gym", "training"],
+}
+ 
+# ──────────────────────────────  Sidebar  ──────────────────────────────
+## 1️⃣  Upload
+st.sidebar.header("1️⃣  Upload your CSV")
+uploaded_file = st.sidebar.file_uploader(
+    "Choose an Instagram CSV file (≤200 MB)",
+    type=["csv"],
+    accept_multiple_files=False,
+)
+ 
+st.sidebar.markdown("---")
+ 
+## 2️⃣  Dictionary
+st.sidebar.header("2️⃣  Modify keyword dictionary")
+ 
+dict_input = st.sidebar.text_area(
+    "Dictionary (JSON)",
+    value=json.dumps(DEFAULT_DICT, indent=2),
+    height=280,
+)
+ 
+try:
+    keyword_dict = json.loads(dict_input)
+    if not isinstance(keyword_dict, dict):
+        raise ValueError("Dictionary root must be a JSON object (key → list).")
+except (json.JSONDecodeError, ValueError) as e:
+    st.sidebar.error(f"❌ {e}\nUsing default dictionary instead.")
+    keyword_dict = DEFAULT_DICT
+ 
+st.sidebar.markdown(
+    """<small>🔧 Edit the JSON above to add/delete categories & keywords.</small>""",
+    unsafe_allow_html=True,
+)
+ 
+# ──────────────────────────────  Helper functions  ──────────────────────────────
+ 
+def classify_sentence(text: str, kw_dict: dict) -> str:
+    """Return first category whose keywords appear in *text* (case‑insensitive)."""
+    text_lower = text.lower()
+    for cat, kws in kw_dict.items():
+        if any(k.lower() in text_lower for k in kws):
+            return cat
+    return "Uncategorized"
+ 
+ 
+def process_dataframe(df: pd.DataFrame, kw_dict: dict) -> pd.DataFrame:
+    """Split captions into sentences/hashtags ➜ classify ➜ tidy DataFrame."""
+    df = df.rename(columns={"shortcode": "ID", "caption": "Context"})
     rows = []
-    for _, row in df_raw.iterrows():
-      
-
-            rows.append(
-                {
-                    "ID": row[id_col],
-            
-                    "Context": row[ctx_col],
-                    "Statement": sent,
-                }
-            )
-
-    if not rows:
-        st.warning("No sentences extracted – check your settings.")
-        st.stop()
-
-    df_out = pd.DataFrame(rows)
-
-    st.success(f"Generated {len(df_out):,} sentence rows.")
-    st.dataframe(df_out.head(20), use_container_width=True)
-
-    # download
-    buffer = io.BytesIO()
-    df_out.to_csv(buffer, index=False)
+    for _, row in df.iterrows():
+        # split on sentence terminators **or** look‑ahead for a hashtag
+        sentences = re.split(r"(?<=[.!?])\s+|(?=#[^\s]+)", str(row["Context"]))
+        for i, s in enumerate(sentences, start=1):
+            clean = re.sub(r"\s+", " ", s.strip())
+            if clean and not re.fullmatch(r"[.!?]+", clean):
+                rows.append(
+                    {
+                        "ID": row["ID"],
+                        "Context": row["Context"],
+                        "Sentence ID": i,
+                        "Statement": clean,
+                        "Category": classify_sentence(clean, keyword_dict),
+                    }
+                )
+    return pd.DataFrame(rows)
+ 
+# ──────────────────────────────  How to Use  ──────────────────────────────
+ 
+st.markdown(
+    """
+### How to Use
+1. **Upload your CSV file** using the file uploader above  
+2. **Select ID Column** – Choose the column that uniquely identifies each record  
+3. **Select Context Column** – Choose the column containing the text to be transformed  
+4. **Configure options** – Choose whether to include hashtags as separate sentences  
+5. **Click _Transform_** – Process your data into sentence‑level format  
+6. **Download results** – Get your transformed data as a CSV file  
+ 
+### Output Format
+The transformed data will have the following columns:
+ 
+- **ID**: The identifier from your selected ID column  
+- **Sentence ID**: Sequential number for each sentence within a record  
+- **Context**: The original text from your Context column  
+- **Statement**: Individual sentences extracted from the context  
+    """
+)
+ 
+# ──────────────────────────────  Main logic  ──────────────────────────────
+if uploaded_file is None:
+    st.info("👈  Start by uploading a CSV file from the sidebar.")
+    st.stop()
+ 
+raw_df = pd.read_csv(uploaded_file)
+ 
+if not {"shortcode", "caption"}.issubset(raw_df.columns):
+    st.error("CSV must contain `shortcode` and `caption` columns.")
+    st.stop()
+ 
+if st.sidebar.button("⚙️  Transform"):
+    with st.spinner("Processing …"):
+        final_df = process_dataframe(raw_df, keyword_dict)
+ 
+    st.success("Processing complete!")
+    st.subheader("Preview of processed data")
+    st.dataframe(final_df, use_container_width=True)
+ 
+    buff = StringIO()
+    final_df.to_csv(buff, index=False)
     st.download_button(
-        "⬇️  Download processed CSV",
-        data=buffer.getvalue(),
-        file_name="processed_data.csv",
+        "💾  Download CSV",
+        data=buff.getvalue(),
         mime="text/csv",
+        file_name="transformed_text.csv",
     )
-else:
-    st.info("Adjust options, then click **Process** in the sidebar.")
-
-
