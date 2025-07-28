@@ -29,7 +29,6 @@ import pandas as pd
 import streamlit as st
 
 # one-time download for sentence splitter
-nltk.download("punkt", quiet=True)
 
 # ───────────────────────────────────────────────────────────────────────
 # Regex helpers
