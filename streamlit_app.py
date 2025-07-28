@@ -30,7 +30,6 @@ import streamlit as st
 
 
 # one-time download for sentence splitter
-nltk.download("punkt", quiet=True)
 
 # ------------------------------------------------------------------ helpers
 PUNCT_ONLY_RE = re.compile(r"^[\W_]+$")          # e.g. '!!!'
