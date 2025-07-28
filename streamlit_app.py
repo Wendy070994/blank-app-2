@@ -13,7 +13,6 @@ from typing import List
 
 import pandas as pd
 import streamlit as st
-from unidecode import unidecode
 
 # One-time NLTK download (safe to re-run)
 nltk.download("punkt", quiet=True)
