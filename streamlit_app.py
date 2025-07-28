@@ -17,8 +17,6 @@ import streamlit as st
 ###############################################################################
 # One-time NLTK setup                                                          #
 ###############################################################################
-try:
-    nltk.data.find("tokenizers/punkt")
 except (LookupError, OSError):
     nltk.download("punkt")
 
