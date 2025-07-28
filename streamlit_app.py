@@ -11,8 +11,6 @@ import logging
 import re
 from typing import List
 
-import emoji
-import nltk
 import pandas as pd
 import streamlit as st
 from nltk.tokenize import sent_tokenize
