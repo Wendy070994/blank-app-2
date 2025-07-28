@@ -22,7 +22,6 @@ import streamlit as st
 
 
 # one-time download for the sentence splitter
-nltk.download("punkt", quiet=True)
 
 # ─────────────────────────────── helpers
 HASHTAG_RE     = re.compile(r"(#\w+)")
