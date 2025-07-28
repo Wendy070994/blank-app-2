@@ -15,7 +15,6 @@ import pandas as pd
 import streamlit as st
 
 # One-time NLTK download (safe to re-run)
-nltk.download("punkt", quiet=True)
 
 # ---------------------------------------------------------------------
 # Configuration
