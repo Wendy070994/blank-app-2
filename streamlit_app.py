@@ -20,7 +20,7 @@ import streamlit as st
 
 
 # one-time download for the sentence splitter
-nltk.download("punkt", quiet=True)
+
 
 # ────────────────────────────────────────────────────────────
 # Regex helpers
