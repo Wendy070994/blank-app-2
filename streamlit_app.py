@@ -13,7 +13,6 @@ from typing import List
 
 import pandas as pd
 import streamlit as st
-from nltk.tokenize import sent_tokenize
 from unidecode import unidecode
 
 # One-time NLTK download (safe to re-run)
